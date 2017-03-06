@@ -187,7 +187,7 @@ class FreeNAS_LDAP_Directory(object):
             self.__dict__.update(_s)
 
     def _logex(self, ex):
-        log.debug("FreeNAS_LDAP_Directory[ERROR]: An LDAP Exception occured")
+        log.debug("FreeNAS_LDAP_Directory[ERROR]: An LDAP Exception occured", exc_info=True)
         for e in ex:
             if 'info' in e:
                 log.debug(
@@ -1043,7 +1043,7 @@ class FreeNAS_ActiveDirectory_Base(object):
 
         if len(srv_hosts) == 1:
             for s in srv_hosts:
-                host = s.target.to_text(True)
+                host = s.target.to_text(True).decode('utf8')
                 port = int(s.port)
                 return (host, port)
 
@@ -1055,7 +1055,7 @@ class FreeNAS_ActiveDirectory_Base(object):
             latencies[host] += duration
 
         for srv_host in srv_hosts:
-            host = srv_host.target.to_text(True)
+            host = srv_host.target.to_text(True).decode('utf8')
             port = int(srv_host.port)
 
             try:
@@ -1076,7 +1076,7 @@ class FreeNAS_ActiveDirectory_Base(object):
         latency_list = sorted(iter(latencies.items()), key=lambda a_b: (a_b[1], a_b[0]))
         if latency_list:
             for s in srv_hosts:
-                host = s.target.to_text(True)
+                host = s.target.to_text(True).decode('utf8')
                 port = int(s.port)
                 if host.lower() == latency_list[0][0].lower():
                     best_host = (host, port)
@@ -1498,15 +1498,14 @@ class FreeNAS_ActiveDirectory_Base(object):
             if krb_principal and krb_principal.upper() == principal.upper():
                 return True
 
-            (fd, tmpfile) = tempfile.mkstemp(dir="/tmp")
-            os.fchmod(fd, 0o600)
-            os.write(fd, self.bindpw)
-            os.close(fd)
+            f = tempfile.NamedTemporaryFile(mode='w+', dir="/tmp")
+            os.chmod(f.name, 0o600)
+            f.write(self.bindpw)
 
             args = [
                 "/usr/bin/kinit",
                 "--renewable",
-                "--password-file=%s" % tmpfile,
+                "--password-file=%s" % f.name,
                 "%s" % principal
             ]
 
@@ -1517,7 +1516,7 @@ class FreeNAS_ActiveDirectory_Base(object):
             if res is not False:
                 kinit = True
 
-            os.unlink(tmpfile)
+            f.close()
 
         if kinit:
             i = 0
@@ -1856,9 +1855,10 @@ class FreeNAS_ActiveDirectory_Base(object):
 
         results = self.get_rootDSE()
         try:
-            results = results[0][1]['rootDomainNamingContext'][0]
+            results = results[0][1]['rootDomainNamingContext'][0].decode('utf8')
 
         except:
+            log.debug('Failed to get rootDN', exc_info=True)
             results = None
 
         log.debug("FreeNAS_ActiveDirectory_Base.get_rootDN: leave")
@@ -1869,9 +1869,10 @@ class FreeNAS_ActiveDirectory_Base(object):
 
         results = self.get_rootDSE()
         try:
-            results = results[0][1]['defaultNamingContext'][0]
+            results = results[0][1]['defaultNamingContext'][0].decode('utf8')
 
         except:
+            log.debug('Failed to get baseDN', exc_info=True)
             results = None
 
         log.debug("FreeNAS_ActiveDirectory_Base.get_baseDN: leave")
@@ -1882,9 +1883,10 @@ class FreeNAS_ActiveDirectory_Base(object):
 
         results = self.get_rootDSE()
         try:
-            results = results[0][1]['configurationNamingContext'][0]
+            results = results[0][1]['configurationNamingContext'][0].decode('utf8')
 
         except:
+            log.debug('Failed to get config', exc_info=True)
             results = None
 
         log.debug("FreeNAS_ActiveDirectory_Base.get_config: leave")
@@ -1896,14 +1898,14 @@ class FreeNAS_ActiveDirectory_Base(object):
         basedn = self.get_baseDN()
         config = self.get_config()
         filter = "(&(objectcategory=crossref)(nCName=%s))" % \
-            basedn.encode('utf-8')
+            basedn
 
         netbios_name = None
         results = self._search(
             self.dchandle, config, ldap.SCOPE_SUBTREE, filter
         )
         try:
-            netbios_name = results[0][1]['nETBIOSName'][0]
+            netbios_name = results[0][1]['nETBIOSName'][0].decode('utf8')
 
         except:
             netbios_name = None
@@ -1923,7 +1925,7 @@ class FreeNAS_ActiveDirectory_Base(object):
         ]
         for k in keys:
             if k in kwargs:
-                filter = "(%s=%s)" % (k, kwargs[k].encode('utf-8'))
+                filter = "(%s=%s)" % (k, kwargs[k])
                 break
 
         if filter is None:
@@ -1945,12 +1947,12 @@ class FreeNAS_ActiveDirectory_Base(object):
         log.debug("FreeNAS_ActiveDirectory_Base.get_root_domain: enter")
 
         rootDSE = self.get_rootDSE()
-        rdnc = rootDSE[0][1]['rootDomainNamingContext'][0]
+        rdnc = rootDSE[0][1]['rootDomainNamingContext'][0].decode('utf8')
 
         domain = None
         results = self.get_partitions(ncname=rdnc)
         try:
-            domain = results[0][1]['dnsRoot'][0]
+            domain = results[0][1]['dnsRoot'][0].decode('utf8')
 
         except:
             domain = None
@@ -1991,7 +1993,7 @@ class FreeNAS_ActiveDirectory_Base(object):
             domains.append(r[0])
 
         rootDSE = self.get_rootDSE()
-        basedn = rootDSE[0][1]['configurationNamingContext'][0]
+        basedn = rootDSE[0][1]['configurationNamingContext'][0].decode('utf8')
         # config = rootDSE[0][1]['defaultNamingContext'][0]
 
         if not self.allow_trusted_doms and self.netbiosname:
@@ -2010,12 +2012,11 @@ class FreeNAS_ActiveDirectory_Base(object):
                 for k in keys:
                     if k in kwargs:
                         filter = "(&(objectcategory=crossref)(%s=%s))" % \
-                            (k, kwargs[k].encode('utf-8'))
+                            (k, kwargs[k])
                         break
 
             if filter is None:
-                filter = "(&(objectcategory=crossref)(nCName=%s))" % \
-                    d.encode('utf-8')
+                filter = "(&(objectcategory=crossref)(nCName=%s))" % d
 
             results = self._search(
                 self.dchandle, basedn, ldap.SCOPE_SUBTREE, filter
@@ -2023,7 +2024,8 @@ class FreeNAS_ActiveDirectory_Base(object):
             if results and results[0][0]:
                 r = {}
                 for k in list(results[0][1].keys()):
-                    r[k] = results[0][1][k][0]
+                    # FIXME: objectGUID is a binary
+                    r[k] = results[0][1][k][0].decode('utf8', 'ignore')
                 result.append(r)
 
             if haskey:
@@ -2335,7 +2337,7 @@ class FreeNAS_ActiveDirectory_Base(object):
                     res = True
 
             except Exception as e:
-                log.debug("ldap modify error: %s", e)
+                log.debug("ldap modify error: %s", e, exc_info=True)
                 res = False
 
         log.debug("FreeNAS_ActiveDirectory_Base.disable_machine_account: leave")
